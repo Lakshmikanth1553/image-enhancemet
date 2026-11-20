@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Histogram Equalization – Four Lighting Conditions</title>
+<style>
+:root{--bg:#f4f6fb;--card:#fff;--ink:#182238;--muted:#65738a;--line:#e1e7f0;--blue:#315efb;--pale:#edf1ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Arial,sans-serif}
+header{background:linear-gradient(120deg,#142044,#315efb);color:#fff;padding:30px 20px}
+header>div,main{max-width:1150px;margin:auto}h1{font-size:clamp(25px,4vw,36px);margin:5px 0}header p{color:#e0e8ff;margin:0}
+main{padding:24px 18px 50px}.card{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:19px;margin-bottom:18px;box-shadow:0 8px 24px #1b2b4d0b}
+h2{font-size:19px;margin:0 0 12px}.muted{color:var(--muted);font-size:13px}
+.uploads{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.upload{border:1px dashed #b8c5d9;background:#f9faff;padding:13px;border-radius:11px}.upload label{display:block;font-weight:bold;margin-bottom:6px}.upload input{width:100%;font-size:12px}
+button{border:0;border-radius:9px;background:var(--blue);color:white;padding:12px 18px;font-weight:bold;cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}.actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:16px}#status{font-size:13px;color:var(--muted)}
+.note{background:var(--pale);border-radius:10px;padding:12px 14px;color:#344778;font-size:13px}
+.condition{border:1px solid var(--line);border-radius:13px;padding:15px;margin-top:14px}.condition h3{margin:0 0 12px;font-size:17px}
+.results{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+figure{margin:0;min-width:0}figure h4{font-size:13px;margin:0 0 7px}.preview{min-height:130px;border:1px dashed var(--line);border-radius:9px;background:#f8f9fc;display:grid;place-items:center;color:#98a3b5;font-size:12px;overflow:hidden}.preview canvas{width:100%;height:auto;display:block}
+.graphs{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:14px}.graph{width:100%;height:auto;border:1px solid var(--line);border-radius:9px;background:#fff}
+.metrics{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}.metrics td,.metrics th{padding:8px;border-bottom:1px solid var(--line);text-align:right}.metrics td:first-child,.metrics th:first-child{text-align:left}.metrics th{color:var(--muted)}
+.shared{margin-top:12px}.shared canvas{width:100%;height:auto;border:1px solid var(--line);border-radius:9px}
+@media(max-width:760px){.uploads{grid-template-columns:repeat(2,1fr)}.results{grid-template-columns:1fr}.graphs{grid-template-columns:1fr}}
+</style></head>
+<body>
+<header><div><div style="font-size:11px;letter-spacing:.15em;color:#c8d5ff;font-weight:bold">ECE3401 · DIGITAL IMAGE PROCESSING · CA-3</div>
+<h1>Histogram Equalization Studio</h1><p>Four illumination conditions · Grayscale conversion · Shared histogram equalization · Image quality comparison</p></div></header>
+<main>
+<section class="card">
+<h2>1. Upload the four captured images</h2>
+<p class="muted">Upload the same scene or object captured under Day, Midday, Evening and Night illumination.</p>
+<div class="uploads">
+<div class="upload"><label for="day">Day</label><input id="day" type="file" accept="image/*"></div>
+<div class="upload"><label for="midday">Midday</label><input id="midday" type="file" accept="image/*"></div>
+<div class="upload"><label for="evening">Evening</label><input id="evening" type="file" accept="image/*"></div>
+<div class="upload"><label for="night">Night</label><input id="night" type="file" accept="image/*"></div>
+</div><div class="actions"><button id="process">Process all four images together</button><span id="status">Select all four images to begin.</span></div>
+</section>
+<section class="card"><h2>2. Processing method</h2>
+<div class="note">All four images are resized to the same dimensions and converted to grayscale. Their grayscale pixel counts are pooled to create <b>one common histogram and one shared equalization lookup table</b>. The same mapping is applied to each condition's grayscale image. The four images are not blended or made into a collage.</div>
+<p class="muted">This lets you compare the four lighting conditions using a common equalization mapping. The equalization method is conventional global histogram equalization (HE), not CLAHE or BBHE.</p></section>
+<section class="card">
+<h2>3. Results for each illumination condition</h2>
+<div id="results"><p class="muted">Upload all four images and click “Process all four images together”. Each condition will show the original captured image, grayscale image, original histogram, equalized histogram, final equalized image and quality measurements.</p></div>
+</section>
+<section class="card">
+<h2>4. Joint image segmentation</h2>
+<div class="note">After histogram equalization, the system combines the pixel-intensity data from all four enhanced grayscale images to calculate one global Otsu threshold. That same threshold is applied to each enhanced image, producing four binary segmentation masks. This uses all four conditions together rather than finding a separate threshold for each image.</div>
+<p class="muted" id="segStatus">Segmentation results will appear after the four images have been processed.</p>
+<div id="segResults"></div>
+</section>
+<section class="card"><h2>5. Combined dataset histogram</h2><p class="muted">This histogram is calculated by pooling grayscale pixels from all four resized images. It is the source of the shared equalization mapping.</p><canvas id="pooledHist" width="900" height="260" class="shared"></canvas></section>
+</main>
+<script>
+const ids=['day','midday','evening','night'],labels=['Day','Midday','Evening','Night'], $=id=>document.getElementById(id);
+function cv(w,h){const c=document.createElement('canvas');c.width=w;c.height=h;return c}
+function hist(a){const h=new Array(256).fill(0);for(let i=0;i<a.length;i++)h[a[i]]++;return h}
+function stats(a){let s=0;for(const v of a)s+=v;const mean=s/a.length;let v=0;for(const x of a)v+=(x-mean)**2;return {mean,contrast:Math.sqrt(v/a.length)}}
+function cdf(h,total){let s=0;return h.map(v=>(s+=v)/total)}
+function drawHist(canvas,h1,h2){const x=canvas.getContext('2d'),w=canvas.width,h=canvas.height;x.clearRect(0,0,w,h);x.fillStyle='#fff';x.fillRect(0,0,w,h);const max=Math.max(1,...h1,...(h2||[]));x.strokeStyle='#e7ecf3';for(let j=1;j<4;j++){x.beginPath();x.moveTo(0,j*h/4);x.lineTo(w,j*h/4);x.stroke()}for(let i=0;i<256;i++){const a=h1[i]/max*(h-35);x.fillStyle='#8d99aa';x.fillRect(i*w/256,h-20-a,w/256+.4,a);if(h2){const b=h2[i]/max*(h-35);x.fillStyle='#315efb';x.fillRect(i*w/256,h-20-b,w/256+.4,b)}}x.fillStyle='#64748b';x.font='13px Arial';x.fillText(h2?'Grey: original   Blue: equalized':'Pooled original histogram',8,16);x.fillText('0',5,h-4);x.fillText('Intensity (0–255)',w/2-50,h-4);x.fillText('255',w-35,h-4)}
+function drawImageBox(id,source){const box=$(id);box.innerHTML='';const c=cv(source.width,source.height);c.getContext('2d').drawImage(source,0,0);box.appendChild(c)}
+function imageFrom(file){return new Promise((resolve,reject)=>{const url=URL.createObjectURL(file),im=new Image();im.onload=()=>{URL.revokeObjectURL(url);resolve(im)};im.onerror=()=>{URL.revokeObjectURL(url);reject(Error('An image could not be opened.'))};im.src=url})}
+function grayImage(gray,w,h){const c=cv(w,h),x=c.getContext('2d'),im=x.createImageData(w,h);for(let p=0;p<gray.length;p++){const k=p*4,v=gray[p];im.data[k]=im.data[k+1]=im.data[k+2]=v;im.data[k+3]=255}x.putImageData(im,0,0);return c}
+function equalizeLUT(pooled,total){const h=hist(pooled),d=cdf(h,total),min=d.find(v=>v>0)||0,lut=new Uint8Array(256);for(let i=0;i<256;i++)lut[i]=min>=1?i:Math.max(0,Math.min(255,Math.round((d[i]-min)/(1-min)*255)));return {lut,h}}
+
+function otsuThreshold(values){
+ const h=hist(values),total=values.length;let sum=0;
+ for(let i=0;i<256;i++)sum+=i*h[i];
+ let sumB=0,wB=0,best=-1,threshold=0;
+ for(let t=0;t<256;t++){
+  wB+=h[t];if(!wB)continue;
+  const wF=total-wB;if(!wF)break;
+  sumB+=t*h[t];
+  const mB=sumB/wB,mF=(sum-sumB)/wF;
+  const between=wB*wF*(mB-mF)*(mB-mF);
+  if(between>best){best=between;threshold=t}
+ }
+ return threshold;
+}
+function binaryMask(gray,w,h,t){
+ const c=cv(w,h),x=c.getContext('2d'),im=x.createImageData(w,h);
+ let foreground=0;
+ for(let p=0;p<gray.length;p++){
+  const v=gray[p]>t?255:0,k=p*4;
+  if(v)foreground++;
+  im.data[k]=im.data[k+1]=im.data[k+2]=v;im.data[k+3]=255;
+ }
+ x.putImageData(im,0,0);
+ return {canvas:c,foreground};
+}
+function runJointSegmentation(equalizedImages,w,h){
+ const all=new Uint8Array(equalizedImages.reduce((s,a)=>s+a.length,0));
+ let pos=0;equalizedImages.forEach(a=>{all.set(a,pos);pos+=a.length});
+ const threshold=otsuThreshold(all),host=$('segResults');
+ host.innerHTML='';
+ const summary=document.createElement('div');
+ summary.className='note';
+ summary.innerHTML=`<b>Shared Otsu threshold: ${threshold}</b><br>Calculated from ${all.length.toLocaleString()} pixels pooled across all four equalized images. Pixels greater than the threshold are classified as foreground (white); all other pixels are background (black).`;
+ host.appendChild(summary);
+ const grid=document.createElement('div');grid.className='results';grid.style.marginTop='14px';
+ equalizedImages.forEach((arr,i)=>{
+  const seg=binaryMask(arr,w,h,threshold),figure=document.createElement('figure');
+  figure.innerHTML=`<h4>${labels[i]} — segmented mask</h4><div class="preview" id="segImg${i}"></div><p class="muted">Foreground pixels: ${seg.foreground.toLocaleString()} (${(100*seg.foreground/arr.length).toFixed(2)}%)</p>`;
+  grid.appendChild(figure);
+  host.appendChild(grid);
+  drawImageBox('segImg'+i,seg.canvas);
+ });
+ $('segStatus').textContent='Segmentation completed using one common threshold for all four equalized images.';
+}
+function process(){
+ const files=ids.map(id=>$(id).files[0]);if(files.some(f=>!f)){$('status').textContent='Please select all four images.';return}
+ $('process').disabled=true;$('status').textContent='Processing all four images…';
+ Promise.all(files.map(imageFrom)).then(imgs=>{
+  const w=Math.min(...imgs.map(im=>im.naturalWidth)),h=Math.min(...imgs.map(im=>im.naturalHeight)),n=w*h;
+  const grayImages=[];
+  imgs.forEach(im=>{const c=cv(w,h),x=c.getContext('2d',{willReadFrequently:true});x.drawImage(im,0,0,w,h);const d=x.getImageData(0,0,w,h).data,g=new Uint8Array(n);for(let p=0;p<n;p++){const k=p*4;g[p]=Math.round(.299*d[k]+.587*d[k+1]+.114*d[k+2])}grayImages.push({original:c,gray:g})});
+  const pooled=new Uint8Array(n*4);let offset=0;grayImages.forEach(o=>{pooled.set(o.gray,offset);offset+=n});
+  const {lut,h:pooledHistogram}=equalizeLUT(pooled,pooled.length);
+  drawHist($('pooledHist'),pooledHistogram,null);
+  $('results').innerHTML='';
+  const equalizedAll=[];
+  grayImages.forEach((o,i)=>{
+   const eq=new Uint8Array(n);for(let p=0;p<n;p++)eq[p]=lut[o.gray[p]];
+   equalizedAll.push(eq);
+   const grayCanvas=grayImage(o.gray,w,h),eqCanvas=grayImage(eq,w,h),originalHist=hist(o.gray),equalizedHist=hist(eq),before=stats(o.gray),after=stats(eq);
+   const section=document.createElement('section');section.className='condition';
+   section.innerHTML=`<h3>${labels[i]} illumination</h3><div class="results">
+   <figure><h4>Original captured image</h4><div class="preview" id="orig${i}"></div></figure>
+   <figure><h4>Grayscale image</h4><div class="preview" id="gray${i}"></div></figure>
+   <figure><h4>Final histogram-equalized image</h4><div class="preview" id="eq${i}"></div></figure>
+   </div><div class="graphs">
+   <figure><h4>Original intensity histogram</h4><canvas id="oh${i}" class="graph" width="600" height="210"></canvas></figure>
+   <figure><h4>Equalized histogram</h4><canvas id="eh${i}" class="graph" width="600" height="210"></canvas></figure>
+   </div><table class="metrics"><tr><th>Image quality parameter</th><th>Original grayscale</th><th>Enhanced</th></tr>
+   <tr><td>Image dimensions</td><td>${w} × ${h}</td><td>${w} × ${h}</td></tr>
+   <tr><td>Mean intensity (0–255)</td><td>${before.mean.toFixed(2)}</td><td>${after.mean.toFixed(2)}</td></tr>
+   <tr><td>Contrast (standard deviation)</td><td>${before.contrast.toFixed(2)}</td><td>${after.contrast.toFixed(2)}</td></tr></table>`;
+   $('results').appendChild(section);
+   drawImageBox('orig'+i,o.original);drawImageBox('gray'+i,grayCanvas);drawImageBox('eq'+i,eqCanvas);
+   drawHist($('oh'+i),originalHist,null);drawHist($('eh'+i),equalizedHist,null);
+  });
+  runJointSegmentation(equalizedAll,w,h);
+  $('status').textContent=`Completed. Shared histogram equalization and joint Otsu segmentation applied to all four images (${w} × ${h}).`;
+ }).catch(e=>{$('status').textContent=e.message||'Processing failed.'}).finally(()=>{$('process').disabled=false});
+}
+$('process').addEventListener('click',process);
+</script></body></html>
