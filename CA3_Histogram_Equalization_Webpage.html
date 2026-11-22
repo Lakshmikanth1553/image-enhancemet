@@ -1,0 +1,52 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ECE3401 CA-3 Histogram Equalization</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f6fb;color:#182238;font:15px Arial,sans-serif}header{background:#172c56;color:white;padding:28px 5vw}main{max-width:1150px;margin:auto;padding:22px}h1{margin:6px 0;font-size:30px}h2{font-size:19px;margin:0 0 12px}.muted{color:#68778e;font-size:13px}.card{background:white;border:1px solid #e0e7f0;border-radius:14px;padding:18px;margin-bottom:16px}.uploads{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.slot{background:#f8faff;border:1px dashed #b9c7da;padding:12px;border-radius:10px}.slot label{display:block;font-weight:bold;margin-bottom:8px}.slot input{width:100%;font-size:12px}button{border:0;background:#315efb;color:white;padding:12px 18px;border-radius:9px;font-weight:bold;cursor:pointer}.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px}.note{background:#eef3ff;padding:12px;border-radius:9px;font-size:13px}.condition{border-top:1px solid #e4eaf2;padding-top:14px;margin-top:16px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.item h3{font-size:13px}.item canvas,.plots canvas{width:100%;height:auto;border:1px solid #e1e7ef;border-radius:8px}.plots{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}table{border-collapse:collapse;width:100%;font-size:13px}td,th{padding:8px;border-bottom:1px solid #e4eaf2;text-align:right}td:first-child,th:first-child{text-align:left}@media(max-width:760px){.uploads{grid-template-columns:repeat(2,1fr)}.grid,.plots{grid-template-columns:1fr}}
+</style></head><body>
+<header><div>ECE3401 · DIGITAL IMAGE PROCESSING · CA-3</div><h1>Four-Condition Histogram Equalization Studio</h1><p>Upload the same scene captured under Day, Midday, Evening and Night illumination.</p></header>
+<main>
+<section class="card"><h2>1. Upload four captured images</h2><div class="uploads">
+<div class="slot"><label>Day</label><input type="file" id="f0" accept="image/*"></div><div class="slot"><label>Midday</label><input type="file" id="f1" accept="image/*"></div><div class="slot"><label>Evening</label><input type="file" id="f2" accept="image/*"></div><div class="slot"><label>Night</label><input type="file" id="f3" accept="image/*"></div></div>
+<div class="row"><button id="run">Process all four images</button><span id="status" class="muted">Choose all four images.</span></div></section>
+<section class="card"><h2>2. Method</h2><div class="note">The four images are resized to the Day image dimensions and converted to grayscale. Each image receives independent global histogram equalization for the assignment's per-condition output. Separately, the four original histograms are pooled to calculate one shared lookup table. That shared mapping is used to calculate one Otsu threshold from all four images; the same threshold is applied to each condition. No collage is created.</div></section>
+<section class="card"><h2>3. Results for each condition</h2><div id="out" class="muted">Results appear after processing.</div></section>
+<section class="card"><h2>4. Combined histogram and CDF</h2><div class="plots"><div><h3>Pooled original histogram</h3><canvas id="pool" width="650" height="230"></canvas></div><div><h3>Pooled CDF</h3><canvas id="cdf" width="650" height="230"></canvas></div></div><p id="threshold" class="muted"></p></section>
+</main>
+<script>
+const names=["Day","Midday","Evening","Night"],$=id=>document.getElementById(id);
+function C(w,h){let c=document.createElement("canvas");c.width=w;c.height=h;return c}
+function load(f){return new Promise((ok,no)=>{let u=URL.createObjectURL(f),im=new Image();im.onload=()=>{URL.revokeObjectURL(u);ok(im)};im.onerror=no;im.src=u})}
+function gray(d){let a=new Uint8Array(d.length/4);for(let p=0;p<a.length;p++){let k=p*4;a[p]=Math.round(.299*d[k]+.587*d[k+1]+.114*d[k+2])}return a}
+function hist(a){let h=new Float64Array(256);for(let v of a)h[v]++;return h}
+function equalize(a){let h=hist(a),cdf=[],s=0;for(let v of h){s+=v/a.length;cdf.push(s)}let f=cdf.findIndex(v=>v>0),m=cdf[f],lut=new Uint8Array(256);for(let i=0;i<256;i++)lut[i]=m>=1?i:Math.max(0,Math.min(255,Math.round(255*(cdf[i]-m)/(1-m))));return Uint8Array.from(a,v=>lut[v])}
+function otsu(a){let h=hist(a),N=a.length,sum=0;for(let i=0;i<256;i++)sum+=i*h[i];let wb=0,sb=0,best=-1,t=0;for(let i=0;i<256;i++){wb+=h[i];if(!wb)continue;let wf=N-wb;if(!wf)break;sb+=i*h[i];let mb=sb/wb,mf=(sum-sb)/wf,v=wb*wf*(mb-mf)**2;if(v>best){best=v;t=i}}return t}
+function addImage(id,a,w,h){let c=C(w,h),x=c.getContext("2d"),im=x.createImageData(w,h);for(let p=0;p<a.length;p++){let k=4*p,v=a[p];im.data[k]=im.data[k+1]=im.data[k+2]=v;im.data[k+3]=255}x.putImageData(im,0,0);$(id).appendChild(c)}
+function histPlot(id,h,col="#315efb"){let c=$(id),x=c.getContext("2d"),w=c.width,H=c.height,m=Math.max(1,...h);x.clearRect(0,0,w,H);x.fillStyle=col;for(let i=0;i<256;i++)x.fillRect(i*w/256,H-20-h[i]/m*(H-35),w/256+.3,h[i]/m*(H-35));x.fillStyle="#52627b";x.font="12px Arial";x.fillText("Pixel count",8,14);x.fillText("Intensity 0–255",w/2-42,H-3)}
+function stat(a){let m=a.reduce((s,v)=>s+v,0)/a.length;return [m,Math.sqrt(a.reduce((s,v)=>s+(v-m)**2,0)/a.length)]}
+$("run").onclick=async()=>{let fs=[0,1,2,3].map(i=>$("f"+i).files[0]);if(fs.some(v=>!v)){$("status").textContent="Select all four images first.";return}
+$("run").disabled=true;$("status").textContent="Processing…";try{
+let ims=await Promise.all(fs.map(load)),w=ims[0].naturalWidth,h=ims[0].naturalHeight,grays=[],rgbCan=[];
+for(let im of ims){let c=C(w,h),x=c.getContext("2d",{willReadFrequently:true});x.drawImage(im,0,0,w,h);rgbCan.push(c);grays.push(gray(x.getImageData(0,0,w,h).data))}
+let pool=new Float64Array(256);grays.forEach(a=>{let q=hist(a);for(let i=0;i<256;i++)pool[i]+=q[i]});
+let total=grays.reduce((s,a)=>s+a.length,0),cdf=[],s=0;for(let i=0;i<256;i++){s+=pool[i]/total;cdf.push(s)}
+let f=cdf.findIndex(v=>v>0),m=cdf[f],lut=new Uint8Array(256);for(let i=0;i<256;i++)lut[i]=m>=1?i:Math.round(255*(cdf[i]-m)/(1-m));
+let shared=grays.map(a=>Uint8Array.from(a,v=>lut[v])),all=shared.flatMap(a=>Array.from(a)),T=otsu(all);
+$("out").innerHTML="";
+names.forEach((name,i)=>{let enhanced=equalize(grays[i]),mask=Uint8Array.from(shared[i],v=>v>T?255:0),before=stat(grays[i]),after=stat(enhanced),section=document.createElement("div");section.className="condition";
+section.innerHTML=`<h3>${name} condition</h3><div class="grid">
+<div class="item"><h3>Original captured image</h3><div id="orig${i}"></div></div>
+<div class="item"><h3>Grayscale image</h3><div id="gray${i}"></div></div>
+<div class="item"><h3>Final equalized image</h3><div id="eq${i}"></div></div>
+<div class="item"><h3>Original intensity histogram</h3><canvas id="oh${i}" width="450" height="170"></canvas></div>
+<div class="item"><h3>Equalized histogram</h3><canvas id="eh${i}" width="450" height="170"></canvas></div>
+<div class="item"><h3>Joint Otsu segmentation</h3><div id="mask${i}"></div></div></div>
+<p class="muted">Mean: ${before[0].toFixed(2)} → ${after[0].toFixed(2)} | Contrast (standard deviation): ${before[1].toFixed(2)} → ${after[1].toFixed(2)} | Foreground: ${(100*mask.filter(v=>v>0).length/mask.length).toFixed(2)}%</p>`;
+$("out").appendChild(section);
+let orig=C(w,h);orig.getContext("2d").drawImage(rgbCan[i],0,0);$("orig"+i).appendChild(orig);
+addImage("gray"+i,grays[i],w,h);addImage("eq"+i,enhanced,w,h);addImage("mask"+i,mask,w,h);
+histPlot("oh"+i,hist(grays[i]),"#7d899b");histPlot("eh"+i,hist(enhanced));
+});
+histPlot("pool",pool,"#64748b");let c=$("cdf"),x=c.getContext("2d");x.clearRect(0,0,c.width,c.height);x.beginPath();cdf.forEach((v,i)=>{let xx=i*c.width/255,yy=c.height-20-v*(c.height-35);i?x.lineTo(xx,yy):x.moveTo(xx,yy)});x.strokeStyle="#315efb";x.lineWidth=2;x.stroke();$("threshold").textContent=`One common Otsu threshold from all four shared-mapping images: ${T}/255.`;
+$("status").textContent="Completed.";
+}catch(e){$("status").textContent="Error: "+e.message}finally{$("run").disabled=false}};
+</script></body></html>
